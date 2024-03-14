@@ -3,7 +3,7 @@
 ; ----------------------------------------------------------------------------------------
 ; The 64-bit OS X ABI complies at large to the System V ABI - AMD64 Architecture Processor Supplement. 
 ; Its code model is very similar to the Small position independent code model (PIC) with the differences explained here. 
-; In that code model all local and small data is accessed directly using RIP-relative addressing. 
+; In that code model all local and small data is accessed directly using RIP-relative addressing.
 ; As noted in the comments by Z boson, the image base for 64-bit Mach-O executables is beyond the first 4 GiB of the virtual address space, 
 ; therefore push msg is not only an invalid way to put the address of msg on the stack, but it is also an impossible one since PUSH does not support 
 ; 64-bit immediate values.
@@ -34,41 +34,50 @@
 ;     ret
 ;
 ; https://stackoverflow.com/questions/10973650/how-to-use-scanf-in-nasm
+;
+; https://stackoverflow.com/questions/20082414/mac-os-x-32-bit-nasm-assembly-program-using-main-and-scanf-printf
 ; 
 
             section     .data
 
 split:      db          "--------------------------------------------------------------", 10, 0
 welcome1:   db          "(っ◔◡◔)っ Добро пожаловать! (っ◔◡◔)っ", 10, 0
-welcome2:   db          "Данная программа предназначена для вычисления значений функций", 10, 0
-welcome3:   db          "Операции деления не учитывают остаток!", 10, 0
-case1:      db          "1) X^3 + Y - 1", 10, 0
-case2:      db          "2) (XY + 1) / X^2", 10, 0
-case3:      db          "3) (X+Y)/(X-Y)", 10, 0
-case4:      db          "4) -1/X^3 + 3", 10, 0
-case5:      db          "5) X - Y/X + 1", 10, 0
-exitCase:   db          "Для выхода из программы введите 0", 10, 0
+welcome2:   db          "Данная программа предназначена для вычисления значения функции:", 10, 10, 0
+welcome3_1: db          "                                     ⌈ A * X, если X mod 3 = 2                      ⌈ A - X, если A > X", 10, 0
+welcome3:   db          "y = y1 * y2, где y1 = Σ X от 0 до 9 〈                           y2 = Σ X от 0 до 9〈", 10, 0
+welcome3_2: db          "                                     ⌊ 9 в остальных случаях                        ⌊ A + 2, если A <= X", 10, 10, 0
 
 zeroDiv:    db          "Ошибка: нельзя делить на ноль", 10, 0
 
 switch:     db          "Введите номер функции:", 10, 0
 
-int_in1:    db          "Введите X" , 10, 0
-int_in2:    db          "Введите Y" , 10, 0
-intFormat:  db          "%d", 0
-intPrint:   db          "Результат: %d", 10, 0
-intPrint2:   db          "Результат: %d %d", 10, 0
+int_in1:    db          "Введите A" , 10, 0
+int_in2:    db          "Введите X" , 10, 0
+inFormat:   db          "%lf", 0
+intPrint2:  db          "Результат: %d", 10, 0
+floatPrint: db          "%.5lf", 10, 0
+
+price:      dq          0.1
+
+test_float: dq          1.2345
+
+one:        dq          1.0
+two:        dq          2.0
+three:      dq          3.0
+nine:       dq          9.0
 
 
             section     .bss
 
-userSw:     resd        1
-var1:       resd        1
-var2:       resd        1
+var1:       resq        1
+var2:       resq        1
+
+result:     resq        1
 
 global      _main
 extern      _printf
 extern      _scanf
+extern      _fmod
 default     rel
 
             section     .text
@@ -77,23 +86,13 @@ _main:      push        rbp                     ; Call stack must be aligned (st
 
             call        _welcome                ; приветственное сообщение
 
-            ; выбор функции
-
-            lea         rdi, [intFormat]
-            lea         rsi, [userSw]
-            xor         rax, rax
-            call        _scanf
-
-            cmp         dword [userSw], 0
-            je          _end
-
             ; Ввод первого числа
 
             lea         rdi, [int_in1]    
             xor         rax, rax                ; Это типа более быстрый и короткий путь для того чтобы установить EAX в 0
             call        _printf
 
-            lea         rdi, [intFormat]
+            lea         rdi, [inFormat]
             lea         rsi, [var1]
             xor         rax, rax
             call        _scanf
@@ -104,137 +103,113 @@ _main:      push        rbp                     ; Call stack must be aligned (st
             xor         rax, rax                ; Это типа более быстрый и короткий путь для того чтобы установить EAX в 0
             call        _printf
 
-            lea         rdi, [intFormat]
+            lea         rdi, [inFormat]
             lea         rsi, [var2]
             xor         rax, rax
             call        _scanf
 
-            ; Switch case
+            xor         rsi, rsi
 
-            mov         eax, [userSw]
+_count_y1:  
+            mov         rcx, 1
+            movq        xmm5, qword[result]
+            movq        xmm3, qword[var1]      ; A исх
+            movq        xmm4, qword[var2]      ; X (x каждую итерацию += 1)
 
-            cmp         eax, 1
-            je          _case1
-            cmp         eax, 2
-            je          _case2
-            cmp         eax, 3
-            je          _case3
-            cmp         eax, 4
-            je          _case4
-            cmp         eax, 5
-            je          _case5
+_y1_loop: 
+            movsd       xmm0, xmm4
+            movq        xmm1, qword[three]
 
-            jmp         _end
-
-
-_case1: 
-            ; --------------------------------------------------------------------------------
-            ; Z = X^3 + Y - 1
-            ; --------------------------------------------------------------------------------
-
-            mov         rax, [var1]             
-            mov         rbx, 3
-            call        _power              ; x ^ 3
-            mov         rbx, [var2]
-            add         rax, rbx            ; + y
-            dec         rax                 ; - 1
-            jmp         _print_result
-
-
-_case2: 
-            ; --------------------------------------------------------------------------------
-            ; (XY + 1) / X^2
-            ; --------------------------------------------------------------------------------
-
-            mov         ecx, [var1]         ; сохраняю X в rcx
-            mov         eax, ecx            ; кидаю X в rax
-            imul        dword [var2]        ; (x * y)
-            add         eax, 1
-            mov         ebx, ecx
-            imul        ebx, ecx
-            xor         edx, edx
-            cdq
-            idiv        ebx
-            jmp         _print_result
-
-
-_case3: 
-            ; --------------------------------------------------------------------------------
-            ; (X+Y)/(X-Y)
-            ; --------------------------------------------------------------------------------
-
-            mov         eax, [var1]
-            mov         ebx, [var1]
-
-            add         eax, dword [var2]
-            sub         ebx, dword [var2]
-
-            jz          _division_by_zero
-
-            xor         edx, edx
-            cdq
-            idiv        ebx
-
-            jmp         _print_result
-
-
-_case4: 
-            ; --------------------------------------------------------------------------------
-            ; -1/X^3 + 3
-            ; --------------------------------------------------------------------------------
-
-            mov         eax, [var1]
-
-            cmp         eax, 0
-            je          _division_by_zero
-
-            mov         ebx, 3
-            call        _power
-
-            mov         ebx, eax            ; теперь в ebx x^3
-            mov         eax, -1             ; а в eax -1
-
-            xor         edx, edx
-            cdq
-            idiv        ebx
-
-            add         eax, 3
-
-            jmp         _print_result
-
-
-_case5: 
-            ; --------------------------------------------------------------------------------
-            ; X - Y/X + 1
-            ; --------------------------------------------------------------------------------
+            mov         rbx, rcx
+            call        _fmod
+            mov         rcx, rbx
             
-            mov         ebx, [var1]
+            movq         rax, xmm0      
+            cmp          rax, [two]             ; проверка x mod 3
 
-            cmp         eax, 0
-            je          _division_by_zero
+            jz          _y1_case1
+            jnz         _y1_case2
 
-            mov         eax, [var2]
+_y1_case1: 
+            movsd       xmm0, xmm3
+            mulsd       xmm0, xmm4
+            addsd       xmm5, xmm0
 
-            xor         edx, edx
-            cdq
-            idiv ebx
+            addsd       xmm4, qword[one]
 
-            mov         rbx, rax
-            mov         rax, [var1]
+            loop        _y1_loop
 
-            sub         rax, rbx
+            jmp         _complete_y1
 
-            inc         rax
+_y1_case2:     
+            addsd       xmm5, qword[nine]
 
-            jmp         _print_result
+            addsd       xmm4, qword[one]
+
+            loop        _y1_loop
+
+            jmp         _complete_y1
+
+_complete_y1:   
+            movq       r12, xmm5                ; y1
+
+; ==================================================
+
+_count_y2:  
+            mov         rcx, 1
+            movq        xmm5, qword[result]
+            movq        xmm3, qword[var1]      ; A исх
+            movq        xmm4, qword[var2]      ; X (x каждую итерацию += 1)
+
+_y2_loop:   
+            movq        rax, xmm3
+            movq        rbx, xmm4
+
+            cmp         rax, rbx
+
+            ja          _y2_case1
+            jng         _y2_case2
+            
+
+_y2_case1:  
+            movsd       xmm0, xmm3
+            subsd       xmm0, xmm4
+            
+            addsd       xmm5, xmm0
+
+            addsd       xmm4, qword[one]
+
+            loop        _y2_loop
+
+            jmp         _complete_y2
+
+
+_y2_case2:  
+            movsd       xmm0, xmm3
+            addsd       xmm0, qword[two]
+            
+            addsd       xmm5, xmm0
+
+            addsd       xmm4, qword[one]
+
+            loop        _y2_loop
+
+            jmp         _complete_y2
+
+_complete_y2:   
+            movsd       xmm0, xmm5
+
+_complete:  
+            movq        xmm1, r12  
+            mulsd       xmm0, xmm1
 
 _print_result: 
             ; --------------------------------------------------------------------------------
             ; Вывод результата
+            ; результат должен быть в XMM0
             ; --------------------------------------------------------------------------------
-
-            lea         rdi, [intPrint2]
-            mov         rsi, rax
+            lea         rdi, floatPrint
+            mov         eax, 1
             call        _printf
 
 
@@ -246,6 +221,7 @@ _end:
             pop         rbp                     ; Fix up stack before returning
             mov         rax, 0                  ; exit code 0
             ret
+
 
 _division_by_zero:  
             lea         rdi, [zeroDiv]
@@ -282,37 +258,16 @@ _welcome:
     lea         rdi, [welcome2]
     call        _printf
 
+    lea         rdi, [welcome3_1]
+    call        _printf
+
     lea         rdi, [welcome3]
     call        _printf
 
-    lea         rdi, [split]
-    call        _printf
-
-    lea         rdi, [case1]
-    call        _printf
-
-    lea         rdi, [case2]
-    call        _printf
-
-    lea         rdi, [case3]
-    call        _printf
-
-    lea         rdi, [case4]
-    call        _printf
-
-    lea         rdi, [case5]
+    lea         rdi, [welcome3_2]
     call        _printf
 
     lea         rdi, [split]
-    call        _printf
-
-    lea         rdi, [exitCase]
-    call        _printf
-
-    lea         rdi, [split]
-    call        _printf
-
-    lea         rdi, [switch]
     call        _printf
     
     pop         rbp
